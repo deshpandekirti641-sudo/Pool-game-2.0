@@ -1,0 +1,199 @@
+'use client';
+
+import React, { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Trophy, TrendingUp, TrendingDown, Clock, Target, IndianRupee } from 'lucide-react';
+
+interface MatchHistoryProps {
+  userId: string;
+}
+
+interface Match {
+  id: string;
+  date: Date;
+  opponent: string;
+  result: 'win' | 'loss' | 'draw';
+  playerScore: number;
+  opponentScore: number;
+  betAmount: number;
+  earnings: number;
+  duration: number;
+}
+
+export default function MatchHistory({ userId }: MatchHistoryProps): JSX.Element {
+  const [matches] = useState<Match[]>([
+    {
+      id: 'match_1',
+      date: new Date(Date.now() - 3600000),
+      opponent: 'Player_7823',
+      result: 'win',
+      playerScore: 85,
+      opponentScore: 60,
+      betAmount: 1000,
+      earnings: 600,
+      duration: 60
+    },
+    {
+      id: 'match_2',
+      date: new Date(Date.now() - 7200000),
+      opponent: 'PoolMaster99',
+      result: 'loss',
+      playerScore: 45,
+      opponentScore: 90,
+      betAmount: 1000,
+      earnings: -1000,
+      duration: 60
+    },
+    {
+      id: 'match_3',
+      date: new Date(Date.now() - 10800000),
+      opponent: 'QuickShot',
+      result: 'win',
+      playerScore: 120,
+      opponentScore: 75,
+      betAmount: 2000,
+      earnings: 1200,
+      duration: 60
+    }
+  ]);
+
+  const stats = {
+    totalMatches: matches.length,
+    wins: matches.filter((m: Match) => m.result === 'win').length,
+    losses: matches.filter((m: Match) => m.result === 'loss').length,
+    totalEarnings: matches.reduce((sum: number, m: Match) => sum + m.earnings, 0),
+    averageScore: Math.round(matches.reduce((sum: number, m: Match) => sum + m.playerScore, 0) / matches.length),
+  };
+
+  const winRate = stats.totalMatches > 0 ? Math.round((stats.wins / stats.totalMatches) * 100) : 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="p-4 text-center">
+            <Trophy className="w-8 h-8 mx-auto mb-2 text-yellow-600" />
+            <p className="text-2xl font-bold text-green-600">{stats.wins}</p>
+            <p className="text-xs text-gray-600">Wins</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 text-center">
+            <Target className="w-8 h-8 mx-auto mb-2 text-red-600" />
+            <p className="text-2xl font-bold text-red-600">{stats.losses}</p>
+            <p className="text-xs text-gray-600">Losses</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 text-center">
+            <TrendingUp className="w-8 h-8 mx-auto mb-2 text-blue-600" />
+            <p className="text-2xl font-bold text-blue-600">{winRate}%</p>
+            <p className="text-xs text-gray-600">Win Rate</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-4 text-center">
+            <IndianRupee className="w-8 h-8 mx-auto mb-2 text-purple-600" />
+            <p className={`text-2xl font-bold ${stats.totalEarnings >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {stats.totalEarnings >= 0 ? '+' : ''}₹{(stats.totalEarnings / 100).toFixed(2)}
+            </p>
+            <p className="text-xs text-gray-600">Net Earnings</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Match History */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Matches</CardTitle>
+          <CardDescription>Your last {matches.length} played games</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue="all" className="w-full">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="wins">Wins</TabsTrigger>
+              <TabsTrigger value="losses">Losses</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="all" className="space-y-3 mt-4">
+              {matches.map((match: Match) => (
+                <MatchCard key={match.id} match={match} />
+              ))}
+            </TabsContent>
+
+            <TabsContent value="wins" className="space-y-3 mt-4">
+              {matches.filter((m: Match) => m.result === 'win').map((match: Match) => (
+                <MatchCard key={match.id} match={match} />
+              ))}
+            </TabsContent>
+
+            <TabsContent value="losses" className="space-y-3 mt-4">
+              {matches.filter((m: Match) => m.result === 'loss').map((match: Match) => (
+                <MatchCard key={match.id} match={match} />
+              ))}
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function MatchCard({ match }: { match: Match }): JSX.Element {
+  const isWin = match.result === 'win';
+  
+  return (
+    <Card className={`${isWin ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4 flex-1">
+            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
+              isWin ? 'bg-green-100' : 'bg-red-100'
+            }`}>
+              {isWin ? (
+                <Trophy className="w-6 h-6 text-green-600" />
+              ) : (
+                <TrendingDown className="w-6 h-6 text-red-600" />
+              )}
+            </div>
+            
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <p className="font-semibold text-gray-900">vs {match.opponent}</p>
+                <Badge className={isWin ? 'bg-green-600' : 'bg-red-600'}>
+                  {isWin ? 'Won' : 'Lost'}
+                </Badge>
+              </div>
+              
+              <div className="flex items-center gap-4 text-sm text-gray-600">
+                <span className="flex items-center gap-1">
+                  <Target className="w-4 h-4" />
+                  {match.playerScore} - {match.opponentScore}
+                </span>
+                <span className="flex items-center gap-1">
+                  <Clock className="w-4 h-4" />
+                  {match.duration}s
+                </span>
+                <span className="text-xs">{match.date.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-right">
+            <p className="text-xs text-gray-600 mb-1">Entry: ₹{match.betAmount / 100}</p>
+            <p className={`text-xl font-bold ${match.earnings >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {match.earnings >= 0 ? '+' : ''}₹{(match.earnings / 100).toFixed(2)}
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}

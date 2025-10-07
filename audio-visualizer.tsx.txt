@@ -1,0 +1,44 @@
+'use client';
+
+/**
+ * Audio Visualizer Component
+ * Visual feedback for sound effects and music
+ */
+
+import React, { useEffect, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Volume2, VolumeX } from 'lucide-react';
+import { soundManager } from './sound-manager';
+
+export default function AudioVisualizer(): JSX.Element {
+  const [isMuted, setIsMuted] = useState<boolean>(false);
+
+  useEffect(() => {
+    const settings = soundManager.getSettings();
+    setIsMuted(settings.isMuted);
+  }, []);
+
+  const toggleMute = (): void => {
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    soundManager.setMute(newMuted);
+  };
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50">
+      <Button
+        onClick={toggleMute}
+        variant="outline"
+        size="icon"
+        className="w-12 h-12 rounded-full bg-white/90 backdrop-blur shadow-lg hover:bg-white"
+      >
+        {isMuted ? (
+          <VolumeX className="w-6 h-6 text-gray-600" />
+        ) : (
+          <Volume2 className="w-6 h-6 text-green-600" />
+        )}
+      </Button>
+    </div>
+  );
+}

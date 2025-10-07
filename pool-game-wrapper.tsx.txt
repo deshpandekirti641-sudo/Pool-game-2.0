@@ -1,0 +1,199 @@
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Trophy, Clock, Target, Loader2 } from 'lucide-react';
+
+const PoolGameComponent = dynamic(() => import('./pool-game-component'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-96 bg-green-900 rounded-lg">
+      <Loader2 className="w-12 h-12 text-white animate-spin" />
+    </div>
+  ),
+});
+
+interface PoolGameWrapperProps {
+  matchId: string;
+  betAmount: number;
+  onMatchEnd: (won: boolean, earnings: number) => void;
+}
+
+export default function PoolGameWrapper({ matchId, betAmount, onMatchEnd }: PoolGameWrapperProps): JSX.Element {
+  const [isClient, setIsClient] = useState<boolean>(false);
+  const [timeRemaining, setTimeRemaining] = useState<number>(60);
+  const [playerScore, setPlayerScore] = useState<number>(0);
+  const [opponentScore, setOpponentScore] = useState<number>(0);
+  const [matchStatus, setMatchStatus] = useState<'starting' | 'playing' | 'ended'>('starting');
+  const [gameStarted, setGameStarted] = useState<boolean>(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
+  // Starting countdown
+  useEffect(() => {
+    if (matchStatus === 'starting') {
+      const timer = setTimeout(() => {
+        setMatchStatus('playing');
+        setGameStarted(true);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [matchStatus]);
+
+  // Match timer
+  useEffect(() => {
+    if (matchStatus === 'playing' && timeRemaining > 0) {
+      const interval = setInterval(() => {
+        setTimeRemaining(prev => {
+          if (prev <= 1) {
+            clearInterval(interval);
+            setMatchStatus('ended');
+            
+            // Determine winner
+            const won = playerScore > opponentScore;
+            const earnings = won ? (betAmount * 1.6) - betAmount : -betAmount;
+            
+            setTimeout(() => {
+              onMatchEnd(won, earnings);
+            }, 3000);
+            
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+      return () => clearInterval(interval);
+    }
+  }, [matchStatus, timeRemaining, playerScore, opponentScore, betAmount, onMatchEnd]);
+
+  // Simulate opponent score
+  useEffect(() => {
+    if (matchStatus === 'playing') {
+      const interval = setInterval(() => {
+        setOpponentScore(prev => prev + Math.floor(Math.random() * 5));
+      }, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [matchStatus]);
+
+  const handleScoreUpdate = (points: number): void => {
+    setPlayerScore(prev => prev + points);
+  };
+
+  if (!isClient) {
+    return (
+      <Card>
+        <CardContent className="p-8 text-center">
+          <Loader2 className="w-12 h-12 mx-auto text-green-600 animate-spin" />
+          <p className="mt-4 text-gray-600">Initializing Game...</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Match Header */}
+      <Card className="bg-gradient-to-r from-green-600 to-emerald-600 text-white">
+        <CardContent className="p-4">
+          <div className="grid grid-cols-3 gap-4 items-center">
+            {/* Player Score */}
+            <div className="text-center">
+              <p className="text-sm opacity-90">You</p>
+              <p className="text-3xl font-bold">{playerScore}</p>
+              <Badge className="mt-1 bg-white/20">Player 1</Badge>
+            </div>
+
+            {/* Timer */}
+            <div className="text-center">
+              <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 rounded-full mb-2">
+                <Clock className="w-8 h-8" />
+              </div>
+              <p className="text-4xl font-bold">{timeRemaining}s</p>
+              <p className="text-sm opacity-90">Time Left</p>
+            </div>
+
+            {/* Opponent Score */}
+            <div className="text-center">
+              <p className="text-sm opacity-90">Opponent</p>
+              <p className="text-3xl font-bold">{opponentScore}</p>
+              <Badge className="mt-1 bg-white/20">Player 2</Badge>
+            </div>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="mt-4">
+            <Progress value={(timeRemaining / 60) * 100} className="h-2 bg-white/20" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Game Status Messages */}
+      {matchStatus === 'starting' && (
+        <Card className="bg-yellow-50 border-yellow-200">
+          <CardContent className="p-6 text-center">
+            <Trophy className="w-12 h-12 mx-auto text-yellow-600 mb-3" />
+            <h3 className="text-2xl font-bold text-yellow-900">Get Ready!</h3>
+            <p className="text-yellow-800 mt-2">Match starting in 3 seconds...</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {matchStatus === 'ended' && (
+        <Card className={playerScore > opponentScore ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}>
+          <CardContent className="p-6 text-center">
+            <Trophy className={`w-16 h-16 mx-auto mb-3 ${playerScore > opponentScore ? 'text-green-600' : 'text-red-600'}`} />
+            <h3 className={`text-3xl font-bold ${playerScore > opponentScore ? 'text-green-900' : 'text-red-900'}`}>
+              {playerScore > opponentScore ? 'You Won!' : playerScore < opponentScore ? 'You Lost' : 'Draw!'}
+            </h3>
+            <p className="text-lg mt-2">
+              Final Score: <span className="font-bold">{playerScore}</span> - <span className="font-bold">{opponentScore}</span>
+            </p>
+            <p className={`text-xl font-bold mt-3 ${playerScore > opponentScore ? 'text-green-600' : 'text-red-600'}`}>
+              {playerScore > opponentScore 
+                ? `+₹${((betAmount * 1.6 - betAmount) / 100).toFixed(2)}` 
+                : playerScore < opponentScore
+                ? `-₹${(betAmount / 100).toFixed(2)}`
+                : `₹0.00`}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Game Canvas */}
+      <Card>
+        <CardContent className="p-0">
+          <PoolGameComponent 
+            matchId={matchId}
+            onScoreUpdate={handleScoreUpdate}
+            isActive={gameStarted && matchStatus === 'playing'}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Game Instructions */}
+      {matchStatus === 'playing' && (
+        <Card className="bg-blue-50 border-blue-200">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <Target className="w-5 h-5 text-blue-600 mt-0.5" />
+              <div className="flex-1">
+                <p className="font-semibold text-blue-900">How to Play</p>
+                <p className="text-sm text-blue-800 mt-1">
+                  <strong>Desktop:</strong> Click and drag to aim, release to shoot<br />
+                  <strong>Mobile:</strong> Touch and drag to aim, release to shoot
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}

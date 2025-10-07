@@ -1,0 +1,410 @@
+'use client';
+
+/**
+ * Wallet Panel Component
+ * Handles deposits, withdrawals, and transaction history
+ */
+
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ArrowDownCircle, ArrowUpCircle, IndianRupee, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
+import type { PaymentMethod, DepositRequest, WithdrawalRequest, WalletTransaction } from './types';
+import { 
+  processDeposit, 
+  processWithdrawal, 
+  getTransactionHistory, 
+  createTransaction,
+  saveTransaction 
+} from './wallet-manager';
+import { formatINR, paiseToRupees, rupeesToPaise, validateAmount } from '@/functions/currency-utils';
+import { isValidUPI } from '@/functions/validation-utils';
+import { APP_CONFIG } from '@/functions/app-config';
+
+interface WalletPanelProps {
+  userId: string;
+  balance: number;
+  onBalanceUpdate: (newBalance: number) => void;
+}
+
+export default function WalletPanel({ userId, balance, onBalanceUpdate }: WalletPanelProps): JSX.Element {
+  const [depositAmount, setDepositAmount] = useState<string>('');
+  const [withdrawAmount, setWithdrawAmount] = useState<string>('');
+  const [depositMethod, setDepositMethod] = useState<PaymentMethod>('upi');
+  const [withdrawMethod, setWithdrawMethod] = useState<PaymentMethod>('upi');
+  const [upiId, setUpiId] = useState<string>('');
+  const [bankName, setBankName] = useState<string>('');
+  const [accountNumber, setAccountNumber] = useState<string>('');
+  const [ifscCode, setIfscCode] = useState<string>('');
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [processing, setProcessing] = useState<boolean>(false);
+
+  useEffect(() => {
+    loadTransactions();
+  }, [userId]);
+
+  const loadTransactions = (): void => {
+    const history = getTransactionHistory(userId, 20);
+    setTransactions(history);
+  };
+
+  const handleDeposit = async (): Promise<void> => {
+    if (!depositAmount) {
+      toast.error('Please enter deposit amount');
+      return;
+    }
+
+    const amountInPaise = rupeesToPaise(parseFloat(depositAmount));
+    const validation = validateAmount(
+      amountInPaise,
+      APP_CONFIG.wallet.minDepositAmount,
+      APP_CONFIG.wallet.maxDepositAmount
+    );
+
+    if (!validation.valid) {
+      toast.error(validation.error);
+      return;
+    }
+
+    if (depositMethod === 'upi' && !upiId) {
+      toast.error('Please enter UPI ID');
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      const request: DepositRequest = {
+        userId,
+        amount: amountInPaise,
+        method: depositMethod,
+        upiId: depositMethod === 'upi' ? upiId : undefined,
+      };
+
+      const transaction = await processDeposit(request);
+
+      if (transaction.status === 'completed') {
+        const newBalance = balance + amountInPaise;
+        onBalanceUpdate(newBalance);
+        toast.success(`Successfully deposited ${formatINR(amountInPaise)}!`);
+        setDepositAmount('');
+        setUpiId('');
+        loadTransactions();
+      }
+    } catch (error) {
+      toast.error('Deposit failed. Please try again.');
+      console.error('Deposit error:', error);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleWithdraw = async (): Promise<void> => {
+    if (!withdrawAmount) {
+      toast.error('Please enter withdrawal amount');
+      return;
+    }
+
+    const amountInPaise = rupeesToPaise(parseFloat(withdrawAmount));
+    const validation = validateAmount(
+      amountInPaise,
+      APP_CONFIG.wallet.minWithdrawalAmount,
+      APP_CONFIG.wallet.maxWithdrawalAmount
+    );
+
+    if (!validation.valid) {
+      toast.error(validation.error);
+      return;
+    }
+
+    if (amountInPaise > balance) {
+      toast.error('Insufficient balance');
+      return;
+    }
+
+    if (withdrawMethod === 'upi' && !isValidUPI(upiId)) {
+      toast.error('Please enter a valid UPI ID');
+      return;
+    }
+
+    if (withdrawMethod === 'netbanking' && (!bankName || !accountNumber || !ifscCode)) {
+      toast.error('Please fill all bank details');
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      const request: WithdrawalRequest = {
+        userId,
+        amount: amountInPaise,
+        paymentDetails: {
+          method: withdrawMethod,
+          upiId: withdrawMethod === 'upi' ? upiId : undefined,
+          bankName: withdrawMethod === 'netbanking' ? bankName : undefined,
+          accountNumber: withdrawMethod === 'netbanking' ? accountNumber : undefined,
+          ifscCode: withdrawMethod === 'netbanking' ? ifscCode : undefined,
+        },
+      };
+
+      const transaction = await processWithdrawal(request);
+
+      if (transaction.status === 'completed') {
+        const newBalance = balance - amountInPaise;
+        onBalanceUpdate(newBalance);
+        toast.success(`Successfully withdrew ${formatINR(amountInPaise)}!`);
+        setWithdrawAmount('');
+        setUpiId('');
+        setBankName('');
+        setAccountNumber('');
+        setIfscCode('');
+        loadTransactions();
+      }
+    } catch (error) {
+      toast.error('Withdrawal failed. Please try again.');
+      console.error('Withdrawal error:', error);
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const getStatusIcon = (status: WalletTransaction['status']): JSX.Element => {
+    switch (status) {
+      case 'completed':
+        return <CheckCircle className="w-4 h-4 text-green-600" />;
+      case 'failed':
+      case 'cancelled':
+        return <XCircle className="w-4 h-4 text-red-600" />;
+      default:
+        return <Clock className="w-4 h-4 text-yellow-600" />;
+    }
+  };
+
+  const getStatusColor = (status: WalletTransaction['status']): string => {
+    switch (status) {
+      case 'completed':
+        return 'bg-green-600';
+      case 'failed':
+      case 'cancelled':
+        return 'bg-red-600';
+      case 'processing':
+        return 'bg-blue-600';
+      default:
+        return 'bg-yellow-600';
+    }
+  };
+
+  return (
+    <Card className="bg-white/95 backdrop-blur">
+      <CardHeader>
+        <CardTitle>Wallet Management</CardTitle>
+        <CardDescription>Manage your deposits, withdrawals, and transactions</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue="deposit" className="space-y-4">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="deposit">
+              <ArrowDownCircle className="w-4 h-4 mr-2" />
+              Deposit
+            </TabsTrigger>
+            <TabsTrigger value="withdraw">
+              <ArrowUpCircle className="w-4 h-4 mr-2" />
+              Withdraw
+            </TabsTrigger>
+            <TabsTrigger value="history">
+              <Clock className="w-4 h-4 mr-2" />
+              History
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Deposit Tab */}
+          <TabsContent value="deposit" className="space-y-4">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="depositAmount">Amount (₹)</Label>
+                <Input
+                  id="depositAmount"
+                  type="number"
+                  placeholder="Enter amount"
+                  value={depositAmount}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDepositAmount(e.target.value)}
+                  disabled={processing}
+                />
+                <p className="text-sm text-gray-600">
+                  Min: {formatINR(APP_CONFIG.wallet.minDepositAmount)} | Max: {formatINR(APP_CONFIG.wallet.maxDepositAmount)}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="depositMethod">Payment Method</Label>
+                <Select value={depositMethod} onValueChange={(value: string) => setDepositMethod(value as PaymentMethod)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="upi">UPI</SelectItem>
+                    <SelectItem value="netbanking">Net Banking</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {depositMethod === 'upi' && (
+                <div className="space-y-2">
+                  <Label htmlFor="depositUpi">UPI ID</Label>
+                  <Input
+                    id="depositUpi"
+                    type="text"
+                    placeholder="yourname@upi"
+                    value={upiId}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUpiId(e.target.value)}
+                    disabled={processing}
+                  />
+                </div>
+              )}
+
+              <Button onClick={handleDeposit} disabled={processing} className="w-full bg-green-600 hover:bg-green-700">
+                {processing ? 'Processing...' : 'Deposit Money'}
+              </Button>
+            </div>
+          </TabsContent>
+
+          {/* Withdraw Tab */}
+          <TabsContent value="withdraw" className="space-y-4">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="withdrawAmount">Amount (₹)</Label>
+                <Input
+                  id="withdrawAmount"
+                  type="number"
+                  placeholder="Enter amount"
+                  value={withdrawAmount}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWithdrawAmount(e.target.value)}
+                  disabled={processing}
+                />
+                <p className="text-sm text-gray-600">
+                  Available: {formatINR(balance)} | Min: {formatINR(APP_CONFIG.wallet.minWithdrawalAmount)}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="withdrawMethod">Withdrawal Method</Label>
+                <Select value={withdrawMethod} onValueChange={(value: string) => setWithdrawMethod(value as PaymentMethod)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="upi">UPI</SelectItem>
+                    <SelectItem value="netbanking">Net Banking</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {withdrawMethod === 'upi' ? (
+                <div className="space-y-2">
+                  <Label htmlFor="withdrawUpi">UPI ID</Label>
+                  <Input
+                    id="withdrawUpi"
+                    type="text"
+                    placeholder="yourname@upi"
+                    value={upiId}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUpiId(e.target.value)}
+                    disabled={processing}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="bankName">Bank Name</Label>
+                    <Input
+                      id="bankName"
+                      type="text"
+                      placeholder="State Bank of India"
+                      value={bankName}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBankName(e.target.value)}
+                      disabled={processing}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="accountNumber">Account Number</Label>
+                    <Input
+                      id="accountNumber"
+                      type="text"
+                      placeholder="1234567890"
+                      value={accountNumber}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAccountNumber(e.target.value)}
+                      disabled={processing}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ifscCode">IFSC Code</Label>
+                    <Input
+                      id="ifscCode"
+                      type="text"
+                      placeholder="SBIN0001234"
+                      value={ifscCode}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIfscCode(e.target.value)}
+                      disabled={processing}
+                    />
+                  </div>
+                </>
+              )}
+
+              <Button onClick={handleWithdraw} disabled={processing} className="w-full bg-red-600 hover:bg-red-700">
+                {processing ? 'Processing...' : 'Withdraw Money'}
+              </Button>
+            </div>
+          </TabsContent>
+
+          {/* History Tab */}
+          <TabsContent value="history">
+            <ScrollArea className="h-[400px]">
+              {transactions.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <IndianRupee className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p>No transactions yet</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {transactions.map((txn) => (
+                    <Card key={txn.id} className="border">
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            {getStatusIcon(txn.status)}
+                            <span className="font-semibold capitalize">{txn.type.replace('_', ' ')}</span>
+                          </div>
+                          <Badge className={getStatusColor(txn.status)}>
+                            {txn.status}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm text-gray-600">{txn.description}</p>
+                          <p className={`text-lg font-bold ${
+                            txn.type === 'deposit' || txn.type === 'match_win' ? 'text-green-600' : 'text-red-600'
+                          }`}>
+                            {txn.type === 'deposit' || txn.type === 'match_win' ? '+' : '-'}
+                            {formatINR(txn.amount)}
+                          </p>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-2">
+                          {new Date(txn.createdAt).toLocaleString('en-IN')}
+                        </p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  );
+}

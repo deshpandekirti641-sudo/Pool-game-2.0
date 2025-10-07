@@ -1,0 +1,343 @@
+// SpacetimeDB imports
+use spacetimedb::{reducer, table, Identity, ReducerContext, Table, Timestamp};
+
+// --- Helpers ---
+
+fn is_email(value: &str) -> bool {
+    value.contains('@')
+}
+
+fn ensure_user_exists(ctx: &ReducerContext, id: Identity) -> Result<User, String> {
+    match ctx.db.user().identity().find(&id) {
+        Some(u) => Ok(u),
+        None => Err("User not found. Please register first.".to_string()),
+    }
+}
+
+fn find_opponent(ctx: &ReducerContext, self_id: Identity, bet_amount_paise: i64) -> Option<Identity> {
+    // Pick the first other identity in queue with same bet
+    for q in ctx.db.match_queue().iter() {
+        if q.identity != self_id && q.bet_amount_paise == bet_amount_paise {
+            return Some(q.identity);
+        }
+    }
+    None
+}
+
+// --- Tables ---
+
+#[table(name = user, public)]
+#[derive(Clone)]
+pub struct User {
+    #[primary_key]
+    identity: Identity,
+    mobile: String,
+    email: String,
+    username: String,
+    wallet_balance_paise: i64,
+    wins: u64,
+    losses: u64,
+    is_verified: bool,
+}
+
+#[table(name = match_queue, public)]
+#[derive(Clone)]
+pub struct MatchQueue {
+    #[primary_key]
+    identity: Identity,
+    #[index(btree)]
+    bet_amount_paise: i64,
+    joined_at: Timestamp,
+}
+
+#[table(name = active_match, public)]
+#[derive(Clone)]
+pub struct ActiveMatch {
+    #[primary_key]
+    #[auto_inc]
+    match_id: u64,
+    player1: Identity,
+    player2: Identity,
+    bet_amount_paise: i64,
+    prize_pool_paise: i64,
+    server_fee_paise: i64,
+    winner: Option<Identity>,
+    status: String, // "in_progress" | "completed" | "cancelled"
+}
+
+#[table(name = transaction, public)]
+#[derive(Clone)]
+pub struct Transaction {
+    #[primary_key]
+    #[auto_inc]
+    id: u64,
+    user_identity: Identity,
+    r#type: String,     // "deposit" | "withdrawal" | "match_bet" | "match_win" | "server_fee"
+    amount_paise: i64,  // signed; deposits positive, withdrawals/bets negative
+    timestamp: Timestamp,
+}
+
+#[table(name = match_log, public)]
+#[derive(Clone)]
+pub struct MatchLog {
+    #[primary_key]
+    #[auto_inc]
+    id: u64,
+    match_id: u64,
+    player1: Identity,
+    player2: Identity,
+    winner: Option<Identity>,
+    bet_amount_paise: i64,
+    started_at: Timestamp,
+    ended_at: Timestamp,
+}
+
+// --- Lifecycle ---
+
+#[reducer(init)]
+pub fn init(_ctx: &ReducerContext) -> Result<(), String> {
+    Ok(())
+}
+
+// --- Reducers ---
+
+// Create or update a user with either mobile or email plus a username
+#[reducer]
+pub fn register_user(ctx: &ReducerContext, mobile_email: String, username: String) -> Result<(), String> {
+    let mut mobile = String::new();
+    let mut email = String::new();
+    if is_email(&mobile_email) {
+        email = mobile_email.clone();
+    } else {
+        mobile = mobile_email.clone();
+    }
+
+    if let Some(mut user) = ctx.db.user().identity().find(&ctx.sender) {
+        user.username = username.clone();
+        if !mobile.is_empty() {
+            user.mobile = mobile.clone();
+        }
+        if !email.is_empty() {
+            user.email = email.clone();
+        }
+        ctx.db.user().identity().update(user);
+    } else {
+        let new_user = User {
+            identity: ctx.sender,
+            mobile,
+            email,
+            username,
+            wallet_balance_paise: 0,
+            wins: 0,
+            losses: 0,
+            is_verified: false,
+        };
+        ctx.db.user().insert(new_user);
+    }
+    Ok(())
+}
+
+// Add funds to wallet (amount_paise > 0)
+#[reducer]
+pub fn deposit_funds(ctx: &ReducerContext, amount_paise: i64) -> Result<(), String> {
+    if amount_paise <= 0 {
+        return Err("Amount must be positive".to_string());
+    }
+    let mut user = ensure_user_exists(ctx, ctx.sender)?;
+    user.wallet_balance_paise = user.wallet_balance_paise.saturating_add(amount_paise);
+    ctx.db.user().identity().update(user);
+
+    ctx.db.transaction().insert(Transaction {
+        id: 0,
+        user_identity: ctx.sender,
+        r#type: "deposit".to_string(),
+        amount_paise,
+        timestamp: ctx.timestamp,
+    });
+
+    Ok(())
+}
+
+// Withdraw funds from wallet (amount_paise > 0)
+#[reducer]
+pub fn withdraw_funds(ctx: &ReducerContext, amount_paise: i64) -> Result<(), String> {
+    if amount_paise <= 0 {
+        return Err("Amount must be positive".to_string());
+    }
+    let mut user = ensure_user_exists(ctx, ctx.sender)?;
+    if user.wallet_balance_paise < amount_paise {
+        return Err("Insufficient balance".to_string());
+    }
+    user.wallet_balance_paise = user.wallet_balance_paise.saturating_sub(amount_paise);
+    ctx.db.user().identity().update(user);
+
+    ctx.db.transaction().insert(Transaction {
+        id: 0,
+        user_identity: ctx.sender,
+        r#type: "withdrawal".to_string(),
+        amount_paise: -amount_paise,
+        timestamp: ctx.timestamp,
+    });
+
+    Ok(())
+}
+
+// Join matchmaking queue; automatically pair with another player on same bet
+#[reducer]
+pub fn join_queue(ctx: &ReducerContext, bet_paise: i64) -> Result<(), String> {
+    if bet_paise <= 0 {
+        return Err("Bet amount must be positive".to_string());
+    }
+
+    // Optional: restrict to a fixed bet of Rs 10 (1000 paise) to align with 16/4 split
+    if bet_paise != 1000 {
+        return Err("Only 1000 paise bets are supported currently".to_string());
+    }
+
+    // Must be registered
+    let mut user = ensure_user_exists(ctx, ctx.sender)?;
+
+    // Must not already be in queue
+    if ctx.db.match_queue().identity().find(&ctx.sender).is_some() {
+        return Err("Already in matchmaking queue".to_string());
+    }
+
+    // Must have funds to cover bet; hold immediately
+    if user.wallet_balance_paise < bet_paise {
+        return Err("Insufficient balance for bet".to_string());
+    }
+    user.wallet_balance_paise = user.wallet_balance_paise.saturating_sub(bet_paise);
+    let user_id = user.identity;
+    ctx.db.user().identity().update(user);
+
+    // Record bet hold
+    ctx.db.transaction().insert(Transaction {
+        id: 0,
+        user_identity: user_id,
+        r#type: "match_bet".to_string(),
+        amount_paise: -bet_paise,
+        timestamp: ctx.timestamp,
+    });
+
+    // Enter queue
+    ctx.db.match_queue().insert(MatchQueue {
+        identity: user_id,
+        bet_amount_paise: bet_paise,
+        joined_at: ctx.timestamp,
+    });
+
+    // Try to find opponent
+    if let Some(opponent_id) = find_opponent(ctx, user_id, bet_paise) {
+        // Create match: fixed split 16 to winner, 4 to developer (i.e., 1600/400 paise) for Rs 10 each
+        let prize_pool_paise = 2 * bet_paise; // 2000 paise if bet_paise == 1000
+        let server_fee_paise = 400;           // 4 rupees
+        let status = "in_progress".to_string();
+
+        match ctx.db.active_match().try_insert(ActiveMatch {
+            match_id: 0,
+            player1: opponent_id,
+            player2: user_id,
+            bet_amount_paise: bet_paise,
+            prize_pool_paise,
+            server_fee_paise,
+            winner: None,
+            status,
+        }) {
+            Ok(inserted) => {
+                // Remove both from queue
+                ctx.db.match_queue().identity().delete(&opponent_id);
+                ctx.db.match_queue().identity().delete(&user_id);
+
+                // Optionally record a start log (we will set both timestamps to now at completion)
+                let _ = ctx.db.match_log().try_insert(MatchLog {
+                    id: 0,
+                    match_id: inserted.match_id,
+                    player1: inserted.player1,
+                    player2: inserted.player2,
+                    winner: None,
+                    bet_amount_paise: bet_paise,
+                    started_at: ctx.timestamp,
+                    ended_at: ctx.timestamp,
+                });
+            }
+            Err(e) => {
+                spacetimedb::log::error!("Failed to create match: {}", e);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+// Complete a match and distribute 16 rupees to winner, 4 rupees to developer
+#[reducer]
+pub fn complete_match(ctx: &ReducerContext, match_id: u64, winner: Identity) -> Result<(), String> {
+    let mut m = match ctx.db.active_match().match_id().find(&match_id) {
+        Some(x) => x,
+        None => return Err("Match not found".to_string()),
+    };
+
+    if m.status == "completed" {
+        return Err("Match already completed".to_string());
+    }
+
+    if winner != m.player1 && winner != m.player2 {
+        return Err("Winner must be a participant".to_string());
+    }
+
+    // Fixed distribution: winner +1600 paise, developer +400 paise
+    let winner_payout = 1600i64;
+    let developer_fee = 400i64;
+
+    // Credit winner
+    if let Some(mut w) = ctx.db.user().identity().find(&winner) {
+        w.wallet_balance_paise = w.wallet_balance_paise.saturating_add(winner_payout);
+        w.wins = w.wins.saturating_add(1);
+        ctx.db.user().identity().update(w);
+    }
+    ctx.db.transaction().insert(Transaction {
+        id: 0,
+        user_identity: winner,
+        r#type: "match_win".to_string(),
+        amount_paise: winner_payout,
+        timestamp: ctx.timestamp,
+    });
+
+    // Update loser stats
+    let loser = if winner == m.player1 { m.player2 } else { m.player1 };
+    if let Some(mut l) = ctx.db.user().identity().find(&loser) {
+        l.losses = l.losses.saturating_add(1);
+        ctx.db.user().identity().update(l);
+    }
+
+    // Record developer fee as a transaction attributed to module identity
+    ctx.db.transaction().insert(Transaction {
+        id: 0,
+        user_identity: ctx.identity(),
+        r#type: "server_fee".to_string(),
+        amount_paise: developer_fee,
+        timestamp: ctx.timestamp,
+    });
+
+    // Mark match completed
+    m.winner = Some(winner);
+    m.status = "completed".to_string();
+    let p1 = m.player1;
+    let p2 = m.player2;
+    let bet = m.bet_amount_paise;
+    ctx.db.active_match().match_id().update(m);
+
+    // Write final match log entry (using now for both timestamps in this minimal example)
+    let _ = ctx.db.match_log().try_insert(MatchLog {
+        id: 0,
+        match_id,
+        player1: p1,
+        player2: p2,
+        winner: Some(winner),
+        bet_amount_paise: bet,
+        started_at: ctx.timestamp,
+        ended_at: ctx.timestamp,
+    });
+
+    Ok(())
+}

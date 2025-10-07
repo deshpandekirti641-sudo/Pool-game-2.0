@@ -1,0 +1,467 @@
+'use client';
+
+import React, { useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { ArrowDownToLine, ArrowUpFromLine, IndianRupee, CreditCard, Building2, Check, X } from 'lucide-react';
+
+interface WalletPanelProps {
+  balance: number;
+  onBalanceUpdate: (newBalance: number) => void;
+}
+
+interface Transaction {
+  id: string;
+  type: 'deposit' | 'withdrawal' | 'win' | 'loss' | 'refund';
+  amount: number;
+  timestamp: Date;
+  status: 'completed' | 'pending' | 'failed';
+  reference?: string;
+}
+
+export default function WalletPanel({ balance, onBalanceUpdate }: WalletPanelProps): JSX.Element {
+  const [depositAmount, setDepositAmount] = useState<string>('');
+  const [withdrawAmount, setWithdrawAmount] = useState<string>('');
+  const [upiId, setUpiId] = useState<string>('');
+  const [accountNumber, setAccountNumber] = useState<string>('');
+  const [ifscCode, setIfscCode] = useState<string>('');
+  const [accountHolder, setAccountHolder] = useState<string>('');
+  const [showDepositDialog, setShowDepositDialog] = useState<boolean>(false);
+  const [showWithdrawDialog, setShowWithdrawDialog] = useState<boolean>(false);
+  const [paymentMethod, setPaymentMethod] = useState<'upi' | 'netbanking'>('upi');
+  
+  const [transactions] = useState<Transaction[]>([
+    {
+      id: 'txn_1',
+      type: 'deposit',
+      amount: 100000,
+      timestamp: new Date(Date.now() - 86400000),
+      status: 'completed',
+      reference: 'UPI12345'
+    },
+    {
+      id: 'txn_2',
+      type: 'win',
+      amount: 1600,
+      timestamp: new Date(Date.now() - 43200000),
+      status: 'completed',
+      reference: 'Match #123'
+    }
+  ]);
+
+  const handleDeposit = (): void => {
+    const amount = parseFloat(depositAmount);
+    if (isNaN(amount) || amount < 10 || amount > 100000) {
+      alert('Please enter a valid amount between ₹10 and ₹1,00,000');
+      return;
+    }
+
+    if (paymentMethod === 'upi' && !upiId) {
+      alert('Please enter your UPI ID');
+      return;
+    }
+
+    if (paymentMethod === 'netbanking' && (!accountNumber || !ifscCode || !accountHolder)) {
+      alert('Please enter all bank details');
+      return;
+    }
+
+    setShowDepositDialog(true);
+  };
+
+  const confirmDeposit = (): void => {
+    const amount = parseFloat(depositAmount) * 100; // Convert to paise
+    onBalanceUpdate(balance + amount);
+    setShowDepositDialog(false);
+    setDepositAmount('');
+    setUpiId('');
+    alert(`₹${(amount / 100).toFixed(2)} deposited successfully!`);
+  };
+
+  const handleWithdraw = (): void => {
+    const amount = parseFloat(withdrawAmount);
+    if (isNaN(amount) || amount < 10) {
+      alert('Minimum withdrawal amount is ₹10');
+      return;
+    }
+
+    const amountInPaise = amount * 100;
+    if (amountInPaise > balance) {
+      alert('Insufficient balance');
+      return;
+    }
+
+    if (paymentMethod === 'upi' && !upiId) {
+      alert('Please enter your UPI ID');
+      return;
+    }
+
+    if (paymentMethod === 'netbanking' && (!accountNumber || !ifscCode || !accountHolder)) {
+      alert('Please enter all bank details');
+      return;
+    }
+
+    setShowWithdrawDialog(true);
+  };
+
+  const confirmWithdraw = (): void => {
+    const amount = parseFloat(withdrawAmount) * 100; // Convert to paise
+    onBalanceUpdate(balance - amount);
+    setShowWithdrawDialog(false);
+    setWithdrawAmount('');
+    setUpiId('');
+    setAccountNumber('');
+    setIfscCode('');
+    setAccountHolder('');
+    alert(`Withdrawal of ₹${(amount / 100).toFixed(2)} initiated. Funds will be transferred within 24 hours.`);
+  };
+
+  const quickDepositAmounts = [100, 500, 1000, 2000, 5000];
+
+  return (
+    <div className="space-y-4">
+      {/* Balance Card */}
+      <Card className="bg-gradient-to-br from-green-600 to-emerald-700 text-white">
+        <CardContent className="p-6">
+          <div className="text-center space-y-2">
+            <p className="text-sm opacity-90">Available Balance</p>
+            <p className="text-5xl font-bold flex items-center justify-center gap-2">
+              <IndianRupee className="w-8 h-8" />
+              {(balance / 100).toFixed(2)}
+            </p>
+            <p className="text-xs opacity-75">All transactions in Indian Rupees (INR)</p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Deposit & Withdraw Tabs */}
+      <Tabs defaultValue="deposit" className="w-full">
+        <TabsList className="grid w-full grid-cols-2">
+          <TabsTrigger value="deposit">
+            <ArrowDownToLine className="w-4 h-4 mr-2" />
+            Deposit
+          </TabsTrigger>
+          <TabsTrigger value="withdraw">
+            <ArrowUpFromLine className="w-4 h-4 mr-2" />
+            Withdraw
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="deposit">
+          <Card>
+            <CardHeader>
+              <CardTitle>Add Funds to Wallet</CardTitle>
+              <CardDescription>Deposit money via UPI or Net Banking</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Payment Method Selection */}
+              <div className="space-y-2">
+                <Label>Payment Method</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={paymentMethod === 'upi' ? 'default' : 'outline'}
+                    onClick={() => setPaymentMethod('upi')}
+                    className="h-auto py-4 flex-col"
+                  >
+                    <CreditCard className="w-6 h-6 mb-2" />
+                    <span>UPI</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={paymentMethod === 'netbanking' ? 'default' : 'outline'}
+                    onClick={() => setPaymentMethod('netbanking')}
+                    className="h-auto py-4 flex-col"
+                  >
+                    <Building2 className="w-6 h-6 mb-2" />
+                    <span>Net Banking</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Amount Input */}
+              <div className="space-y-2">
+                <Label htmlFor="depositAmount">Amount (₹)</Label>
+                <Input
+                  id="depositAmount"
+                  type="number"
+                  placeholder="Enter amount"
+                  value={depositAmount}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDepositAmount(e.target.value)}
+                  min="10"
+                  max="100000"
+                />
+                <p className="text-xs text-gray-500">Min: ₹10 • Max: ₹1,00,000</p>
+              </div>
+
+              {/* Quick Amount Buttons */}
+              <div className="space-y-2">
+                <Label>Quick Select</Label>
+                <div className="grid grid-cols-5 gap-2">
+                  {quickDepositAmounts.map((amt: number) => (
+                    <Button
+                      key={amt}
+                      type="button"
+                      variant="outline"
+                      onClick={() => setDepositAmount(amt.toString())}
+                      className="text-xs"
+                    >
+                      ₹{amt}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Payment Details */}
+              {paymentMethod === 'upi' ? (
+                <div className="space-y-2">
+                  <Label htmlFor="upiId">UPI ID</Label>
+                  <Input
+                    id="upiId"
+                    type="text"
+                    placeholder="yourname@upi"
+                    value={upiId}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUpiId(e.target.value)}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="accountHolder">Account Holder Name</Label>
+                    <Input
+                      id="accountHolder"
+                      type="text"
+                      placeholder="Full Name"
+                      value={accountHolder}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAccountHolder(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="accountNumber">Account Number</Label>
+                    <Input
+                      id="accountNumber"
+                      type="text"
+                      placeholder="Account Number"
+                      value={accountNumber}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAccountNumber(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ifscCode">IFSC Code</Label>
+                    <Input
+                      id="ifscCode"
+                      type="text"
+                      placeholder="IFSC Code"
+                      value={ifscCode}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIfscCode(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <Button onClick={handleDeposit} className="w-full bg-green-600 hover:bg-green-700">
+                Proceed to Deposit
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="withdraw">
+          <Card>
+            <CardHeader>
+              <CardTitle>Withdraw Funds</CardTitle>
+              <CardDescription>Transfer money to your bank account</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Payment Method Selection */}
+              <div className="space-y-2">
+                <Label>Withdrawal Method</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant={paymentMethod === 'upi' ? 'default' : 'outline'}
+                    onClick={() => setPaymentMethod('upi')}
+                    className="h-auto py-4 flex-col"
+                  >
+                    <CreditCard className="w-6 h-6 mb-2" />
+                    <span>UPI</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={paymentMethod === 'netbanking' ? 'default' : 'outline'}
+                    onClick={() => setPaymentMethod('netbanking')}
+                    className="h-auto py-4 flex-col"
+                  >
+                    <Building2 className="w-6 h-6 mb-2" />
+                    <span>Bank Transfer</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Amount Input */}
+              <div className="space-y-2">
+                <Label htmlFor="withdrawAmount">Amount (₹)</Label>
+                <Input
+                  id="withdrawAmount"
+                  type="number"
+                  placeholder="Enter amount"
+                  value={withdrawAmount}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWithdrawAmount(e.target.value)}
+                  min="10"
+                  max={(balance / 100).toString()}
+                />
+                <p className="text-xs text-gray-500">
+                  Available: ₹{(balance / 100).toFixed(2)} • Min: ₹10
+                </p>
+              </div>
+
+              {/* Payment Details */}
+              {paymentMethod === 'upi' ? (
+                <div className="space-y-2">
+                  <Label htmlFor="upiIdWithdraw">UPI ID</Label>
+                  <Input
+                    id="upiIdWithdraw"
+                    type="text"
+                    placeholder="yourname@upi"
+                    value={upiId}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUpiId(e.target.value)}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="accountHolderWithdraw">Account Holder Name</Label>
+                    <Input
+                      id="accountHolderWithdraw"
+                      type="text"
+                      placeholder="Full Name"
+                      value={accountHolder}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAccountHolder(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="accountNumberWithdraw">Account Number</Label>
+                    <Input
+                      id="accountNumberWithdraw"
+                      type="text"
+                      placeholder="Account Number"
+                      value={accountNumber}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAccountNumber(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="ifscCodeWithdraw">IFSC Code</Label>
+                    <Input
+                      id="ifscCodeWithdraw"
+                      type="text"
+                      placeholder="IFSC Code"
+                      value={ifscCode}
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIfscCode(e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-sm text-yellow-800">
+                <p className="font-semibold">Processing Time: 24 hours</p>
+                <p className="text-xs mt-1">Withdrawals are processed within 24 hours on business days</p>
+              </div>
+
+              <Button onClick={handleWithdraw} className="w-full bg-green-600 hover:bg-green-700">
+                Request Withdrawal
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* Recent Transactions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Transactions</CardTitle>
+          <CardDescription>Your latest wallet activity</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {transactions.map((txn: Transaction) => (
+              <div key={txn.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                    txn.type === 'deposit' || txn.type === 'win' ? 'bg-green-100 text-green-600' :
+                    txn.type === 'withdrawal' ? 'bg-blue-100 text-blue-600' :
+                    'bg-red-100 text-red-600'
+                  }`}>
+                    {txn.type === 'deposit' || txn.type === 'win' ? (
+                      <ArrowDownToLine className="w-5 h-5" />
+                    ) : (
+                      <ArrowUpFromLine className="w-5 h-5" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-semibold capitalize">{txn.type}</p>
+                    <p className="text-xs text-gray-500">
+                      {txn.timestamp.toLocaleString()} • {txn.reference}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className={`font-bold ${
+                    txn.type === 'deposit' || txn.type === 'win' ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {txn.type === 'deposit' || txn.type === 'win' ? '+' : '-'}₹{(txn.amount / 100).toFixed(2)}
+                  </p>
+                  <Badge variant={txn.status === 'completed' ? 'default' : 'secondary'} className="text-xs">
+                    {txn.status}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Deposit Confirmation Dialog */}
+      <AlertDialog open={showDepositDialog} onOpenChange={setShowDepositDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Deposit</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to deposit <span className="font-bold text-green-600">₹{depositAmount}</span> via {paymentMethod === 'upi' ? 'UPI' : 'Net Banking'}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeposit} className="bg-green-600 hover:bg-green-700">
+              Confirm Deposit
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Withdraw Confirmation Dialog */}
+      <AlertDialog open={showWithdrawDialog} onOpenChange={setShowWithdrawDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm Withdrawal</AlertDialogTitle>
+            <AlertDialogDescription>
+              You are about to withdraw <span className="font-bold text-blue-600">₹{withdrawAmount}</span> via {paymentMethod === 'upi' ? 'UPI' : 'Bank Transfer'}.
+              Funds will be transferred within 24 hours.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmWithdraw} className="bg-blue-600 hover:bg-blue-700">
+              Confirm Withdrawal
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

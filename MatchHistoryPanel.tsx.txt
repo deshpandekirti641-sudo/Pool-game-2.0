@@ -1,0 +1,196 @@
+'use client';
+
+/**
+ * Match History Panel
+ * Displays detailed match logs and player statistics
+ */
+
+import React, { useEffect, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Trophy, TrendingUp, TrendingDown, Clock, Target } from 'lucide-react';
+import { getMatchLogs, calculatePlayerStats, getMatchSummary } from './match-logger';
+import type { MatchLog, PlayerStats, MatchSummary } from './types';
+import { formatINR } from '@/functions/currency-utils';
+
+interface MatchHistoryPanelProps {
+  userId: string;
+  username: string;
+}
+
+export default function MatchHistoryPanel({ userId, username }: MatchHistoryPanelProps): JSX.Element {
+  const [matches, setMatches] = useState<MatchLog[]>([]);
+  const [stats, setStats] = useState<PlayerStats | null>(null);
+  const [summary, setSummary] = useState<MatchSummary | null>(null);
+
+  useEffect(() => {
+    loadData();
+  }, [userId]);
+
+  const loadData = (): void => {
+    const userMatches = getMatchLogs({ userId });
+    const userStats = calculatePlayerStats(userId, username);
+    const userSummary = getMatchSummary(userId);
+
+    setMatches(userMatches);
+    setStats(userStats);
+    setSummary(userSummary);
+  };
+
+  const getMatchStatusColor = (status: MatchLog['status']): string => {
+    switch (status) {
+      case 'completed':
+        return 'bg-green-600';
+      case 'in_progress':
+        return 'bg-blue-600';
+      case 'cancelled':
+        return 'bg-gray-600';
+      default:
+        return 'bg-yellow-600';
+    }
+  };
+
+  const isWinner = (match: MatchLog): boolean => {
+    return match.winnerId === userId;
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Statistics Summary */}
+      {stats && summary && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Card className="bg-white/95 backdrop-blur">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Total Matches</p>
+                  <p className="text-2xl font-bold text-green-900">{stats.totalMatches}</p>
+                </div>
+                <Trophy className="w-8 h-8 text-green-600" />
+              </div>
+              <div className="mt-2 flex gap-2">
+                <Badge className="bg-green-600">{stats.wins}W</Badge>
+                <Badge className="bg-red-600">{stats.losses}L</Badge>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/95 backdrop-blur">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Win Rate</p>
+                  <p className="text-2xl font-bold text-green-900">{stats.winRate.toFixed(1)}%</p>
+                </div>
+                <Target className="w-8 h-8 text-green-600" />
+              </div>
+              <div className="mt-2">
+                <p className="text-xs text-gray-600">
+                  Streak: {stats.currentWinStreak} (Best: {stats.bestWinStreak})
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="bg-white/95 backdrop-blur">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-gray-600">Net Earnings</p>
+                  <p className={`text-2xl font-bold ${stats.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {formatINR(stats.netProfit)}
+                  </p>
+                </div>
+                {stats.netProfit >= 0 ? (
+                  <TrendingUp className="w-8 h-8 text-green-600" />
+                ) : (
+                  <TrendingDown className="w-8 h-8 text-red-600" />
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Match History */}
+      <Card className="bg-white/95 backdrop-blur">
+        <CardHeader>
+          <CardTitle>Match History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ScrollArea className="h-[400px]">
+            {matches.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <Trophy className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                <p>No matches played yet</p>
+                <p className="text-sm">Start playing to see your match history!</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {matches.map((match) => {
+                  const won = isWinner(match);
+                  const opponentUsername = match.player1Id === userId 
+                    ? match.player2Username 
+                    : match.player1Username;
+                  const playerScore = match.player1Id === userId 
+                    ? match.player1Score 
+                    : match.player2Score;
+                  const opponentScore = match.player1Id === userId 
+                    ? match.player2Score 
+                    : match.player1Score;
+
+                  return (
+                    <Card key={match.id} className={`border-2 ${won ? 'border-green-500 bg-green-50' : 'border-red-500 bg-red-50'}`}>
+                      <CardContent className="p-4">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <Badge className={won ? 'bg-green-600' : 'bg-red-600'}>
+                              {won ? 'WON' : 'LOST'}
+                            </Badge>
+                            <Badge className={getMatchStatusColor(match.status)}>
+                              {match.status}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center gap-1 text-sm text-gray-600">
+                            <Clock className="w-4 h-4" />
+                            {match.duration}s
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between mb-2">
+                          <div>
+                            <p className="font-semibold text-green-900">{username}</p>
+                            <p className="text-sm text-gray-600">vs {opponentUsername}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-2xl font-bold text-green-900">
+                              {playerScore} - {opponentScore}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t">
+                          <div className="text-sm text-gray-600">
+                            Bet: {formatINR(match.betAmount)}
+                          </div>
+                          <div className={`text-sm font-semibold ${won ? 'text-green-600' : 'text-red-600'}`}>
+                            {won ? `+${formatINR(match.winnerEarnings - match.betAmount)}` : `-${formatINR(match.betAmount)}`}
+                          </div>
+                        </div>
+
+                        <div className="text-xs text-gray-500 mt-2">
+                          {new Date(match.startedAt).toLocaleString('en-IN')}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </ScrollArea>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

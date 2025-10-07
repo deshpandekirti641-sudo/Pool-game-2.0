@@ -1,0 +1,300 @@
+'use client';
+
+/**
+ * Pool Master - Main Application Entry Point
+ * Real-money pool game platform with organized modular architecture
+ */
+
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Wallet, Trophy, History, Settings, IndianRupee } from 'lucide-react';
+import { sdk } from "@farcaster/miniapp-sdk";
+
+// Register module imports
+import type { User, AuthStep, RegistrationData } from '@/register/types';
+import LoginForm from '@/register/LoginForm';
+import OTPVerification from '@/register/OTPVerification';
+import {
+  generateOTP,
+  createUser,
+  saveUserToStorage,
+  loadUserFromStorage,
+  sendOTP,
+  verifyOTP,
+  createOTPSession,
+} from '@/register/auth-utils';
+
+// Wallet module imports
+import WalletPanel from '@/wallet/WalletPanel';
+
+// Match components imports
+import MatchmakingPanel from '@/components/matchmaking-panel';
+import PoolGameWrapper from '@/components/pool-game-wrapper';
+
+// Playlogs module imports
+import MatchHistoryPanel from '@/playlogs/MatchHistoryPanel';
+
+// Developer dashboard
+import DeveloperDashboard from '@/components/developer-dashboard';
+
+export default function PoolGamePlatform(): JSX.Element {
+  useEffect(() => {
+    const initializeFarcaster = async () => {
+      try {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        if (document.readyState !== 'complete') {
+          await new Promise(resolve => {
+            if (document.readyState === 'complete') {
+              resolve(void 0);
+            } else {
+              window.addEventListener('load', () => resolve(void 0), { once: true });
+            }
+          });
+        }
+
+        await sdk.actions.ready();
+        console.log("Farcaster SDK initialized successfully - app fully loaded");
+      } catch (error) {
+        console.error('Failed to initialize Farcaster SDK:', error);
+        setTimeout(async () => {
+          try {
+            await sdk.actions.ready();
+            console.log('Farcaster SDK initialized on retry');
+          } catch (retryError) {
+            console.error('Farcaster SDK retry failed:', retryError);
+          }
+        }, 1000);
+      }
+    };
+    initializeFarcaster();
+  }, []);
+
+  const [authStep, setAuthStep] = useState<AuthStep>('login');
+  const [user, setUser] = useState<User | null>(null);
+  const [activeTab, setActiveTab] = useState<string>('wallet');
+  const [inMatch, setInMatch] = useState<boolean>(false);
+  const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
+  const [otpSession, setOtpSession] = useState<ReturnType<typeof createOTPSession> | null>(null);
+  const [otpError, setOtpError] = useState<string>('');
+
+  // Handle OTP send
+  const handleSendOTP = async (data: RegistrationData): Promise<void> => {
+    const otp = generateOTP();
+    const session = createOTPSession(data.contactValue, data.contactMethod, otp);
+    setOtpSession(session);
+
+    // Send OTP
+    await sendOTP(data.contactMethod, data.contactValue, otp);
+    
+    // Show OTP in alert for demo (in production, this would be sent via SMS/Email)
+    alert(`OTP sent to ${data.contactValue}: ${otp}\n(Demo mode - In production, this would be sent via SMS/Email)`);
+    
+    setAuthStep('otp');
+  };
+
+  // Handle OTP verification
+  const handleVerifyOTP = (enteredOtp: string): void => {
+    if (!otpSession) {
+      setOtpError('No active OTP session');
+      return;
+    }
+
+    const result = verifyOTP(enteredOtp, otpSession);
+
+    if (result.success) {
+      const newUser = createUser(
+        otpSession.contactMethod,
+        otpSession.contactValue,
+        'Player' // Username would be captured in registration form
+      );
+      
+      setUser(newUser);
+      saveUserToStorage(newUser);
+      setAuthStep('authenticated');
+      setOtpError('');
+    } else {
+      setOtpError(result.error || 'Invalid OTP');
+    }
+  };
+
+  // Update wallet balance
+  const updateWalletBalance = (newBalance: number): void => {
+    if (user) {
+      const updatedUser = { ...user, walletBalance: newBalance };
+      setUser(updatedUser);
+      saveUserToStorage(updatedUser);
+    }
+  };
+
+  // Handle match start
+  const handleMatchStart = (matchId: string): void => {
+    setCurrentMatchId(matchId);
+    setInMatch(true);
+    setActiveTab('game');
+  };
+
+  // Handle match end
+  const handleMatchEnd = (won: boolean, earnings: number): void => {
+    if (user) {
+      const updatedUser = {
+        ...user,
+        walletBalance: user.walletBalance + earnings,
+        totalMatches: user.totalMatches + 1,
+        wins: won ? user.wins + 1 : user.wins,
+        losses: won ? user.losses : user.losses + 1,
+      };
+      setUser(updatedUser);
+      saveUserToStorage(updatedUser);
+    }
+    setInMatch(false);
+    setCurrentMatchId(null);
+    setActiveTab('wallet');
+  };
+
+  // Load user from localStorage on mount
+  useEffect(() => {
+    const savedUser = loadUserFromStorage();
+    if (savedUser) {
+      setUser(savedUser);
+      setAuthStep('authenticated');
+    }
+  }, []);
+
+  // Render authentication screens
+  if (authStep === 'login') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-900 via-green-800 to-emerald-900 flex items-center justify-center p-4 pt-16">
+        <LoginForm onSendOTP={handleSendOTP} />
+      </div>
+    );
+  }
+
+  if (authStep === 'otp' && otpSession) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-green-900 via-green-800 to-emerald-900 flex items-center justify-center p-4 pt-16">
+        <OTPVerification
+          contactValue={otpSession.contactValue}
+          onVerify={handleVerifyOTP}
+          onBack={() => setAuthStep('login')}
+          error={otpError}
+        />
+      </div>
+    );
+  }
+
+  // Render main app
+  if (!user) return null;
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-green-900 via-green-800 to-emerald-900 p-2 sm:p-4 pt-16">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <Card className="mb-4 bg-white/95 backdrop-blur">
+          <CardContent className="p-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full flex items-center justify-center">
+                  <Trophy className="w-6 h-6 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-green-900">{user.username}</h1>
+                  <p className="text-sm text-gray-600">
+                    {user.mobile || user.email}
+                    {user.isDeveloper && <Badge className="ml-2 bg-purple-600">Developer</Badge>}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="text-right">
+                  <p className="text-sm text-gray-600">Wallet Balance</p>
+                  <p className="text-2xl font-bold text-green-600 flex items-center gap-1">
+                    <IndianRupee className="w-5 h-5" />
+                    {(user.walletBalance / 100).toFixed(2)}
+                  </p>
+                </div>
+                <Separator orientation="vertical" className="h-12" />
+                <div className="text-center">
+                  <p className="text-sm text-gray-600">Win Rate</p>
+                  <p className="text-xl font-bold text-green-800">
+                    {user.totalMatches > 0 ? Math.round((user.wins / user.totalMatches) * 100) : 0}%
+                  </p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Main Content */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <Card className="bg-white/95 backdrop-blur">
+            <CardContent className="p-2">
+              <TabsList className="grid w-full grid-cols-5 gap-1">
+                <TabsTrigger value="wallet" className="text-xs sm:text-sm" disabled={inMatch}>
+                  <Wallet className="w-4 h-4 mr-1" />
+                  <span className="hidden sm:inline">Wallet</span>
+                </TabsTrigger>
+                <TabsTrigger value="play" className="text-xs sm:text-sm" disabled={inMatch}>
+                  <Trophy className="w-4 h-4 mr-1" />
+                  <span className="hidden sm:inline">Play</span>
+                </TabsTrigger>
+                <TabsTrigger value="game" className="text-xs sm:text-sm" disabled={!inMatch}>
+                  <Settings className="w-4 h-4 mr-1" />
+                  <span className="hidden sm:inline">Game</span>
+                </TabsTrigger>
+                <TabsTrigger value="history" className="text-xs sm:text-sm" disabled={inMatch}>
+                  <History className="w-4 h-4 mr-1" />
+                  <span className="hidden sm:inline">History</span>
+                </TabsTrigger>
+                {user.isDeveloper && (
+                  <TabsTrigger value="developer" className="text-xs sm:text-sm" disabled={inMatch}>
+                    <Badge className="w-4 h-4 mr-1 bg-purple-600">D</Badge>
+                    <span className="hidden sm:inline">Admin</span>
+                  </TabsTrigger>
+                )}
+              </TabsList>
+            </CardContent>
+          </Card>
+
+          <TabsContent value="wallet">
+            <WalletPanel 
+              userId={user.id}
+              balance={user.walletBalance}
+              onBalanceUpdate={updateWalletBalance}
+            />
+          </TabsContent>
+
+          <TabsContent value="play">
+            <MatchmakingPanel
+              user={user}
+              onMatchStart={handleMatchStart}
+            />
+          </TabsContent>
+
+          <TabsContent value="game">
+            {inMatch && currentMatchId && (
+              <PoolGameWrapper
+                matchId={currentMatchId}
+                betAmount={1000}
+                onMatchEnd={handleMatchEnd}
+              />
+            )}
+          </TabsContent>
+
+          <TabsContent value="history">
+            <MatchHistoryPanel userId={user.id} username={user.username} />
+          </TabsContent>
+
+          {user.isDeveloper && (
+            <TabsContent value="developer">
+              <DeveloperDashboard />
+            </TabsContent>
+          )}
+        </Tabs>
+      </div>
+    </div>
+  );
+}

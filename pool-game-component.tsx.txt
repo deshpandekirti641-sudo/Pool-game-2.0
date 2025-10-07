@@ -1,0 +1,61 @@
+'use client';
+
+import React, { useEffect, useRef } from 'react';
+import gameConfig from '@/game/gameConfig';
+import PoolGameScene from '@/game/PoolGameScene';
+import type * as Phaser from 'phaser';
+
+let game: Phaser.Game | null = null;
+
+interface PoolGameComponentProps {
+  matchId: string;
+  onScoreUpdate: (points: number) => void;
+  isActive: boolean;
+}
+
+const PoolGameComponent: React.FC<PoolGameComponentProps> = ({ matchId, onScoreUpdate, isActive }) => {
+  const gameContainerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!game && typeof window !== 'undefined' && gameContainerRef.current) {
+      const PhaserModule = require('phaser');
+      
+      const config = {
+        ...gameConfig,
+        scene: class extends PoolGameScene {
+          constructor() {
+            super();
+            (this as any).matchId = matchId;
+            (this as any).onScoreUpdate = onScoreUpdate;
+            (this as any).isActive = isActive;
+          }
+        },
+        parent: gameContainerRef.current,
+      };
+      
+      game = new PhaserModule.Game(config);
+    }
+
+    return () => {
+      if (game) {
+        game.destroy(true);
+        game = null;
+      }
+    };
+  }, [matchId]);
+
+  // Update game active state
+  useEffect(() => {
+    if (game && game.scene.scenes[0]) {
+      const scene = game.scene.scenes[0] as any;
+      scene.isActive = isActive;
+      scene.onScoreUpdate = onScoreUpdate;
+    }
+  }, [isActive, onScoreUpdate]);
+
+  return (
+    <div ref={gameContainerRef} style={{ width: '100%', height: 500 }} />
+  );
+};
+
+export default PoolGameComponent;
